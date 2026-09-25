@@ -78,6 +78,8 @@ source venv/bin/activate  # On Windows use: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+> **Note (macOS):** TensorFlow 2.8 provides no wheels for Apple Silicon with Python 3.10, so `requirements.txt` installs `tensorflow-macos` 2.9 on macOS instead (selected automatically via environment markers). On macOS, `pyodbc` additionally requires unixODBC (`brew install unixodbc`) to be importable, but it is not needed to run the pipeline.
+
 <a id="usage"></a>
 ## 🚀 Usage
 
