@@ -25,8 +25,9 @@ LEADS = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V
 SEGMENTS = ['P', 'PQ', 'Q', 'R', 'S', 'ST', 'T', 'TP']
 FIDUCIALS = ['p_on', 'p_off', 'qrs_on', 'r_on', 'r_off', 'qrs_off', 't_on', 't_off']  # ms relative to R-peak
 REFERENCE_LEAD = 'aVF'  # Lead whose Q/R/S split defines the segmentation that is applied to all leads
-SEGMENT_COLORS = {'P': '#9ecae1', 'PQ': '#fee391', 'Q': '#fdae6b', 'R': '#e6550d', 'S': '#fd8d3c',
-                  'ST': '#c7e9c0', 'T': '#74c476', 'TP': '#dadaeb'}
+# Gradient from blue (P) over green (QRS, complementary to the red relevance markers) to yellow/peach (T, TP)
+SEGMENT_COLORS = {'P': '#9ecae1', 'PQ': '#b3e2e2', 'Q': '#99d8c9', 'R': '#66c2a4', 'S': '#a1d99b',
+                  'ST': '#d9f0a3', 'T': '#fee391', 'TP': '#fdd0a2'}
 
 
 def ms(samples):
@@ -329,8 +330,9 @@ def plot_global_segments(ecgs, fiducials, r_peaks, save_to, crop=(50, 400)):
             x0, x1 = x_offset + s / FS, x_offset + e / FS
             ax.fill_between([x0, x1], y_offset - 0.9, y_offset + 0.9, color=SEGMENT_COLORS[seg], alpha=0.35,
                             lw=0, zorder=0.8)
-            if s > 0:
-                # Thin dotted border between neighbouring segments, below ECG and explanation
+            if s > 0 or c > 0:
+                # Thin dotted border between neighbouring segments and neighbouring lead panels, below ECG and
+                # explanation
                 ax.plot([x0, x0], [y_offset - 0.9, y_offset + 0.9], color=(0.35, 0.35, 0.35), lw=0.3, ls=(0, (1, 1.5)),
                         zorder=0.9)
             ax.text((x0 + x1) / 2, y_offset + 0.9, seg, ha='center',
