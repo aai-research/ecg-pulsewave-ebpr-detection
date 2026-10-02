@@ -86,11 +86,11 @@ def detect_r_peaks(ecg_f):
     return np.array(keep)
 
 
-def median_beat(ecg_f, r_peaks):
+def mean_beat(ecg_f, r_peaks):
     rr = np.median(np.diff(r_peaks))
     pre, post = int(0.4 * rr), int(0.65 * rr)
     beats = [ecg_f[r - pre:r + post] for r in r_peaks if r - pre >= 0 and r + post <= len(ecg_f)]
-    return np.median(beats, axis=0), pre, len(beats)
+    return np.mean(beats, axis=0), pre, len(beats)
 
 
 def crossing(x, start, stop, thresh):
@@ -131,7 +131,7 @@ def positive_waves(x, amp):
 
 def delineate(beat, pre):
     """
-    Heuristic delineation of a 12-lead median beat. Returns one set of fiducials in ms relative to the R-peak,
+    Heuristic delineation of a 12-lead mean beat. Returns one set of fiducials in ms relative to the R-peak,
     which is applied to all leads.
 
     P on/off, QRS on/off and T on/off are derived from all leads. The QRS is split by the reference lead: Q is
@@ -412,18 +412,18 @@ if __name__ == '__main__':
 
     ecgs = load_windows(base_dir)
 
-    # 1. Delineate one median beat per ECG. Fiducials are stored as an editable CSV and reused if present.
+    # 1. Delineate one mean beat per ECG. Fiducials are stored as an editable CSV and reused if present.
     beats, r_peaks, fids = {}, {}, []
     for ecg_id, windows in ecgs.items():
         full, offset = reconstruct(windows)
         full_f = bandpass(full)
         r = detect_r_peaks(full_f)
         r_peaks[ecg_id] = r + offset
-        beat, pre, n = median_beat(full_f, r)
+        beat, pre, n = mean_beat(full_f, r)
         beats[ecg_id] = (beat, pre)
         fids.append({'ecg_id': ecg_id, **delineate(beat, pre)})
         print(f"{ecg_id}: {len(windows)} windows ({len({f for f, _ in windows})} folds), {len(r)} R-peaks, median RR {ms(np.median(np.diff(r))):.0f} ms, "
-              f"{n} beats in median")
+              f"{n} beats in mean")
 
     if os.path.exists(fid_path) and not args.redelineate:
         print(f"Using existing {fid_path}")
