@@ -25,6 +25,11 @@ LEADS = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V
 SEGMENTS = ['P', 'PQ', 'Q', 'R', 'S', 'ST', 'T', 'TP']
 FIDUCIALS = ['p_on', 'p_off', 'qrs_on', 'r_on', 'r_off', 'qrs_off', 't_on', 't_off']  # ms relative to R-peak
 REFERENCE_LEAD = 'aVF'  # Lead whose Q/R/S split defines the segmentation that is applied to all leads
+# Display names: Q/R/S are QRS windows defined in the reference lead and applied to all leads, so they are labelled by
+# their timing (early, mid, late) rather than as waves, which would not match the morphology of every lead
+LABEL_LONG = {'Q': 'QRS early', 'R': 'QRS mid', 'S': 'QRS late'}
+LABEL_RADAR = {'Q': 'QRS\nearly', 'R': 'QRS\nmid', 'S': 'QRS\nlate'}
+LABEL_TABLE = {'Q': '\\makecell{QRS \\\\ early}', 'R': '\\makecell{QRS \\\\ mid}', 'S': '\\makecell{QRS \\\\ late}'}
 # Gradient from blue (P) over green (QRS, complementary to the red relevance markers) to yellow/peach (T, TP)
 SEGMENT_COLORS = {'P': '#9ecae1', 'PQ': '#b3e2e2', 'Q': '#99d8c9', 'R': '#66c2a4', 'S': '#a1d99b',
                   'ST': '#d9f0a3', 'T': '#fee391', 'TP': '#fdd0a2'}
@@ -232,7 +237,8 @@ def plot_qc(ecg_id, beat, pre, f, save_to):
         ax.set_title(LEADS[lead], fontsize=9, loc='left')
         ax.tick_params(labelsize=7)
     handles = [plt.Rectangle((0, 0), 1, 1, color=SEGMENT_COLORS[s]) for s in SEGMENTS]
-    fig.legend(handles, SEGMENTS, ncol=len(SEGMENTS), loc='upper center', frameon=False)
+    fig.legend(handles, [LABEL_LONG.get(s, s) for s in SEGMENTS], ncol=len(SEGMENTS), loc='upper center',
+               frameon=False)
     fig.suptitle(f"{ecg_id} (Q/R/S from {REFERENCE_LEAD})", y=0.02, fontsize=9)
     fig.supxlabel('Time relative to R-peak (ms)', fontsize=9)
     plt.savefig(save_to, bbox_inches='tight')
@@ -315,6 +321,7 @@ def plot_global_segments(ecgs, fiducials, r_peaks, save_to, crop=(50, 400)):
         c, i = lead // 3, lead % 3
         x_offset, y_offset = secs * c, -(row_height / 2) * i
         lab = labels[lead, crop[0]:crop[1]].copy()
+        qrs_start = None
         # Absorb 1-2 sample fragments at segment borders (resampling ringing) into the preceding segment
         starts = np.flatnonzero(np.diff(np.r_[-2, lab]) != 0)
         ends = np.r_[starts[1:], len(lab)]
@@ -335,10 +342,20 @@ def plot_global_segments(ecgs, fiducials, r_peaks, save_to, crop=(50, 400)):
                 # explanation
                 ax.plot([x0, x0], [y_offset - 0.9, y_offset + 0.9], color=(0.35, 0.35, 0.35), lw=0.3, ls=(0, (1, 1.5)),
                         zorder=0.9)
+            if seg in LABEL_LONG:
+                # One "QRS" label over the three QRS windows (told apart by color and legend)
+                if seg == 'Q' or qrs_start is None:
+                    qrs_start = x0
+                if seg == 'S':
+                    ax.text((qrs_start + x1) / 2, y_offset + 0.9, 'QRS', ha='center', va='bottom', fontsize=3.5,
+                            zorder=4)
+                    qrs_start = None
+                continue
             ax.text((x0 + x1) / 2, y_offset + 0.9, seg, ha='center',
                     va='bottom', fontsize=3.5, zorder=4)
     handles = [plt.Rectangle((0, 0), 1, 1, color=SEGMENT_COLORS[s], alpha=0.35) for s in SEGMENTS]
-    fig.legend(handles, SEGMENTS, ncol=len(SEGMENTS), loc='lower right', bbox_to_anchor=(0.995, 0.005),
+    fig.legend(handles, [LABEL_LONG.get(s, s) for s in SEGMENTS], ncol=len(SEGMENTS), loc='lower right',
+               bbox_to_anchor=(0.995, 0.005),
                frameon=False, fontsize=4, handlelength=1, handletextpad=0.4, columnspacing=0.8)
     plt.savefig(save_to, dpi=300)
     plt.close()
@@ -351,7 +368,7 @@ def write_table(per_ecg, save_to):
         v = f"{m:.{digits}f} $\\pm$ {sd:.{digits}f}"
         return f"\\textbf{{{v}}}" if bold else v
 
-    head = ' & '.join(f"\\textbf{{{s}}}" for s in SEGMENTS)
+    head = ' & '.join(f"\\textbf{{{LABEL_TABLE.get(s, s)}}}" for s in SEGMENTS)
     lines = [f"\\begin{{tabular}}{{l c {'c' * len(SEGMENTS)}}}", "\\toprule",
              f"\\multirow{{2}}{{*}}{{\\textbf{{Lead}}}} & \\multirow{{2}}{{*}}{{\\makecell{{\\textbf{{Relevance}} \\\\ "
              f"\\textbf{{share (\\%)}}}}}} & \\multicolumn{{{len(SEGMENTS)}}}{{c}}{{\\textbf{{Relevance-to-duration "
@@ -383,7 +400,7 @@ def plot_radars(lead_share, seg_pooled, seg_per_lead, out_dir):
     # Length-normalized relevance over segments, pooled over leads and per lead (chance = 1)
     theta = radar_factory(len(SEGMENTS), frame='polygon')
     fig, ax = plt.subplots(figsize=(1.45, 1.45), subplot_kw=dict(projection='radar'))
-    radar(ax, theta, seg_pooled, SEGMENTS, chance=1, rmax=np.ceil(np.nanmax(seg_pooled)), rticks=[1, 2])
+    radar(ax, theta, seg_pooled, [LABEL_RADAR.get(s, s) for s in SEGMENTS], chance=1, rmax=np.ceil(np.nanmax(seg_pooled)), rticks=[1, 2])
     plt.savefig(f"{out_dir}/radar_segments_pooled.pdf", bbox_inches='tight')
     plt.close()
 
@@ -392,7 +409,7 @@ def plot_radars(lead_share, seg_pooled, seg_per_lead, out_dir):
     fig.subplots_adjust(wspace=0.85, hspace=0.55)
     for lead in range(12):
         ax = axs[lead % 3, lead // 3]
-        radar(ax, theta, seg_per_lead[lead], SEGMENTS, chance=1, rmax=rmax, rticks=np.arange(1, rmax))
+        radar(ax, theta, seg_per_lead[lead], [LABEL_RADAR.get(s, s) for s in SEGMENTS], chance=1, rmax=rmax, rticks=np.arange(1, rmax))
         ax.tick_params(axis='x', labelsize=5, pad=-3)
         ax.set_title(LEADS[lead], fontsize=6.5, fontweight='bold', x=-0.12, y=1.02)
     plt.savefig(f"{out_dir}/radar_segments_per_lead.pdf", bbox_inches='tight')
