@@ -42,8 +42,8 @@ def run(input_path, labels, output_path_trainval, output_path_test, number_leads
     # Iterate over the input signal files.
     for f in os.listdir(input_path):
         logging.info("Processing file: %s", f)
-        # Make sure only the first four RPWs are used
-        if int(f.split(".")[0].split("_")[-1]) < 4:
+        # Only the first config.rpw_cycles_per_examination cardiac cycles per examination are used
+        if int(f.split(".")[0].split("_")[-1]) < config.rpw_cycles_per_examination:
             if f.split("_")[0] in trainval_files:
                 output_path = output_path_trainval
             elif f.split("_")[0] in test_files:

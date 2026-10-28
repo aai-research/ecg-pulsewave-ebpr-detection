@@ -14,6 +14,7 @@ classification_threshold = 0.5  # Predicted probability above which a sample is 
 ecg_record_length = 2500  # Length l of the 12-lead ECG recordings (samples, 5 s at 500 Hz)
 ecg_window_size = 2000  # Length w of the ECG input windows (samples, 4 s at 500 Hz)
 ecg_num_windows = 5  # Number n of overlapping ECG windows per recording
+rpw_cycles_per_examination = 4  # Number of RPW cardiac cycles (first exported cycles) used per examination
 n_bootstrap = 10000  # Number of iterations of the paired athlete-level bootstrap (CIs and AUC differences)
 xai_method = "lrpsign_epsilon_0_5_std_x"  # Explainable AI (XAI) method
 posthresh = 0.75  # Threshold for XAI

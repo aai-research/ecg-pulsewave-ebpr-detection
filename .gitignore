@@ -42,5 +42,6 @@ env.bak/
 venv.bak/
 data/
 experiments*
+
 # Backups
 *.bak

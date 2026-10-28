@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 from utils.metrics import roc, auc
 
 # model key -> (column in test_predictions.csv, bootstrap model name, label, colour, line style, width)
-# Colours follow Figure 1 (no green: red-green safe); every model keeps its own line style.
+# No red-green contrasts; every model keeps its own line style.
 # Layout, fonts and axes match the fold-level supplementary figure (utils.evaluation.generate_results).
 MODELS = {
     "rpw": ("p_rpw", "RPW", "RPW", "#4F7CB5", (0, (5, 2)), 1.5),

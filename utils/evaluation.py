@@ -98,6 +98,7 @@ def filter_results_based_on_metrics(df, target_metric, metric_thresholds):
     Returns:
         pd.DataFrame: The top result row matching the constraints.
     """
+    metric_thresholds = dict(metric_thresholds)  # do not modify the caller's dict (e.g. params.json)
     df_tmp = pd.DataFrame(df)
 
     while True:
@@ -370,15 +371,16 @@ def generate_results(collectors, path, table_only_collectors=()):
 
     consolidated_path = f"{path}/results_table.tex"
     with open(consolidated_path, 'w') as f:
-        f.write(r"\begin{tabular}{lllcccccccc}" + "\n")
+        n = config.num_folds
+        f.write(r"\begin{tabular}{lll" + "c" * (n + 3) + "}" + "\n")
         f.write(r"\toprule" + "\n")
         titles_list = ["RPW", "ECG", "Combined"]
         titles_list += [t for t in ["Clinical", "Clinical+Combined"]
                         if any(r['Model'].split(" ")[0] == t for r in consolidated_rows)]
         f.write(
-            r" & \multirow{2}{*}{\textbf{Metric}} & \multirow{2}{*}{\textbf{Dataset}} & \multicolumn{5}{c}{\makecell{\textbf{Group-stratified 5-fold} \\ \textbf{Cross-validation Split}}} & \multirow{2}{*}{\textbf{Mean $\pm$ SD}} & \multirow{2}{*}{\textbf{Ensemble}} & \multirow{2}{*}{\textbf{95\% CI}} \\" + "\n")
-        f.write(r"\cmidrule(lr){4-8}" + "\n")
-        f.write(r" & & & \textbf{1} & \textbf{2} & \textbf{3} & \textbf{4} & \textbf{5} & & & \\" + "\n")
+            r" & \multirow{2}{*}{\textbf{Metric}} & \multirow{2}{*}{\textbf{Dataset}} & \multicolumn{" + str(n) + r"}{c}{\makecell{\textbf{Group-stratified " + str(n) + r"-fold} \\ \textbf{Cross-validation Split}}} & \multirow{2}{*}{\textbf{Mean $\pm$ SD}} & \multirow{2}{*}{\textbf{Ensemble}} & \multirow{2}{*}{\textbf{95\% CI}} \\" + "\n")
+        f.write(r"\cmidrule(lr){4-" + str(n + 3) + "}" + "\n")
+        f.write(" & & & " + " & ".join(rf"\textbf{{{k}}}" for k in range(1, n + 1)) + r" & & & \\" + "\n")
         f.write(r"\midrule" + "\n")
 
         for i, title in enumerate(titles_list):
@@ -405,11 +407,11 @@ def generate_results(collectors, path, table_only_collectors=()):
                 if not metric_rows: continue
 
                 if m_idx > 0:
-                    f.write(r"\cmidrule(lr){2-11}" + "\n")
+                    f.write(r"\cmidrule(lr){2-" + str(n + 6) + "}" + "\n")
 
                 for r_idx, row in enumerate(metric_rows):
                     dataset = row['Dataset']
-                    folds = [row.get(str(k), '-') for k in range(1, 6)]
+                    folds = [row.get(str(k), '-') for k in range(1, n + 1)]
                     ensemble = row.get('Ensemble', '-')
                     mean_sd = row.get('Mean $\\pm$ SD', '-')
                     boot_val = bootstrap_dict.get((title, metric), '-') if ensemble != '-' else '-'
@@ -723,7 +725,7 @@ def generate_cohort_table(path):
     generate_split_table(path)
 
 
-RPW_WINDOWS_PER_EXAMINATION = 4  # RPW single recordings (pulse waves) per examination (see create_labels.ipynb / aggregate_subsamples)
+RPW_WINDOWS_PER_EXAMINATION = config.rpw_cycles_per_examination  # RPW recordings (single cardiac cycles) per examination
 ECG_WINDOWS_PER_EXAMINATION = config.ecg_num_windows  # Overlapping ECG windows per 12-lead recording
 
 
@@ -792,13 +794,12 @@ def generate_split_table(path):
     with open(output_path, 'w') as f:
         f.write("\\begin{tabular}{l" + "c" * len(columns) + "}\n")
         f.write("\\toprule\n")
-        blue = highlight  # whole table highlighted
-        f.write(" & " + " & ".join(blue(f"\\textbf{{{k}}}") for k in columns) + " \\\\\n")
+        f.write(" & " + " & ".join(highlight(f"\\textbf{{{k}}}") for k in columns) + " \\\\\n")  # whole table highlighted
         f.write("\\midrule\n")
         for name, fmt in rows:
             if name == 'RPW recordings':
                 f.write("\\midrule\n")
-            f.write(blue(f"\\textbf{{{name}}}") + " & " + " & ".join(blue(fmt(c)) for c in columns.values()) + " \\\\\n")
+            f.write(highlight(f"\\textbf{{{name}}}") + " & " + " & ".join(highlight(fmt(c)) for c in columns.values()) + " \\\\\n")
         f.write("\\bottomrule\n")
         f.write("\\end{tabular}\n")
     print(f"Split Table saved to {output_path}")

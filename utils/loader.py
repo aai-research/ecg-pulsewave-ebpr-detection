@@ -49,7 +49,7 @@ def load_signals(record):
 
 def load_rpw_labels():
     """
-    Load resting pulse wave (RPW) labels from the CSV file.
+    Load radial pulse wave (RPW) labels from the CSV file.
 
     Returns:
         dict: A dictionary mapping SessionID to Label.

@@ -1,6 +1,6 @@
-# Resting electrocardiographic and pulse-wave deep learning identifies exaggerated exercise blood pressure response in elite athletes
+# Exploratory exercise blood pressure phenotyping from resting biosignals in elite athletes
 
-This repository contains the official code for the paper **"Resting electrocardiographic and pulse-wave deep learning identifies exaggerated exercise blood pressure response in elite athletes"**, which is currently under review at *npj Digital Medicine* (submitted on July 10, 2026).
+This repository contains the official code for the paper **"Exploratory exercise blood pressure phenotyping from resting biosignals in elite athletes"**, which is currently under review at *npj Digital Medicine* (submitted on July 10, 2026).
 
 ---
 
@@ -91,13 +91,14 @@ pip install -r requirements.txt
 Check and update `config.py` as necessary before running the pipeline. Key parameters include:
 - `seed`: Random seed for reproducibility.
 - `directory`: The root directory for the current experiment's data and outputs.
+- Data files referenced (e.g., `matching.csv`, `data.xlsx`, etc.).
 - `num_folds`: Number of cross-validation folds (e.g., 5).
 - `n_bootstrap`: Number of bootstrap iterations for confidence intervals and AUC differences (default: 10,000).
 - `ebpr_threshold`: Outcome definition, eBPR if SBP/MET slope > threshold (default: 6.2 mmHg/MET).
 - `classification_threshold`: Probability threshold for sensitivity, specificity, F1 and the selection of true-positive predictions for XAI (default: 0.5).
 - `ecg_record_length`, `ecg_window_size`, `ecg_num_windows`: ECG windowing, i.e. recording length l, window length w and number n of overlapping windows per recording (default: 2500, 2000, 5 samples at 500 Hz).
+- `rpw_cycles_per_examination`: Number of RPW cardiac cycles used per examination (default: 4).
 - `xai_method`, `posthresh`: LRP variant and relevance-visualization threshold of the global explanations (default: 0.75).
-- Data files referenced (e.g., `matching.csv`, `data.xlsx`, etc.).
 - `clinical_features`, `clinical_missing`, `clinical_class_weight`, `clinical_complete_cases_only`: Settings of the clinical reference model (predictors, handling of missing values, class weighting, evaluation set).
 - `results_name`: Name of the results folder inside `directory`. If `None`, it is derived from the clinical settings (e.g., `results_impute_balanced_all_7vars`), so runs with different settings do not overwrite each other.
 - `highlight_revision`, `highlight_color`: Optionally colour selected content of the LaTeX tables (`\textcolor`, requires `\usepackage{xcolor}`).
@@ -105,7 +106,7 @@ Check and update `config.py` as necessary before running the pipeline. Key param
 ### 2. Data Preparation
 Prepare the data directory structure under `{config.directory}/data/`. To run the pipeline from scratch, you must provide the following raw files:
 - **`ecg_numpy/`**: Directory containing `.npy` files for 12-lead ECG recordings. Expected shape: `(12, 2500)` (500Hz for 5 seconds).
-- **`rpw_numpy/`**: Directory containing `.npy` files for Radial Pulse Wave recordings, one file per exported cardiac cycle (`<SessionID>_<index>.npy`, the first four cycles per examination are used). Expected shape: `(1, 1000)`. The exported cycles have different lengths depending on the cardiac period and were time-normalized to 1,000 samples by linear interpolation.
+- **`rpw_numpy/`**: Directory containing `.npy` files for Radial Pulse Wave recordings, one file per exported cardiac cycle (`<SessionID>_<index>.npy`, the first `rpw_cycles_per_examination` cycles per examination are used). Expected shape: `(1, 1000)`. The exported cycles have different lengths depending on the cardiac period and were time-normalized to 1,000 samples by linear interpolation.
 - **`data.xlsx`**: An Excel file containing manual athlete data (e.g., DateOfBirth, Surname, Firstnames, SBP/MET slope).
 - **`matching.csv`**: A CSV file used to match and de-duplicate patient records (PatID, SN, FN, DoB).
 - **`rpw_data.csv`**: A CSV file containing RPW recording metadata (DateTime, SessionID, etc.).
@@ -170,7 +171,7 @@ If you use this code or find our work helpful, please cite our paper:
 
 ```bibtex
 @article{eckerle2026ebpr,
-  title={Resting electrocardiographic and pulse-wave deep learning identifies exaggerated exercise blood pressure response in elite athletes},
+  title={Exploratory exercise blood pressure phenotyping from resting biosignals in elite athletes},
   author={Eckerle, Dominic and Gumpfer, Nils and Guckert, Michael and Bauer, Pascal and Hannig, Jennifer},
   journal={npj Digital Medicine},
   year={2026},

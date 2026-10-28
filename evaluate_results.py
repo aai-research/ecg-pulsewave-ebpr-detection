@@ -1,4 +1,8 @@
-"""Evaluate trained RPW and ECG models: compute metrics, generate tables, plots, and bootstrap CIs."""
+"""Evaluate the trained RPW and ECG models and the clinical reference model: metrics, ensembles, bootstrap CIs, tables and figures."""
+
+import os
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # must be set before TensorFlow is imported
 
 from utils.gpu import set_visible_gpu
 
@@ -10,10 +14,8 @@ from utils.training import enable_reproducibility
 enable_reproducibility(config.seed)
 
 import tensorflow as tf
-import os
 import logging
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.get_logger().setLevel(logging.ERROR)
 
 import numpy as np
@@ -551,15 +553,9 @@ def extract_validation_aucs(output_dir, model_type):
         while len(fold_aucs) < config.num_folds:
             fold_aucs.append(None)
 
-        results.append({
-            'model_name': model_name,
-            'fold_1': fold_aucs[0],
-            'fold_2': fold_aucs[1],
-            'fold_3': fold_aucs[2],
-            'fold_4': fold_aucs[3],
-            'fold_5': fold_aucs[4],
-            'mean_auc': mean_auc
-        })
+        results.append({'model_name': model_name,
+                        **{f'fold_{k + 1}': fold_aucs[k] for k in range(config.num_folds)},
+                        'mean_auc': mean_auc})
 
     best_model_name = None
     if results:
