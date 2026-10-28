@@ -23,11 +23,13 @@ from matplotlib import ticker
 import csv
 
 from utils.evaluation import generate_results
+from utils.roc_figure import plot_test_rocs
 from utils.metrics import auc, roc, confusionmatrix, f1score
 from utils.splitting import rpw_patients_split_cross_validation, ecg_patients_split_cross_validation
 from utils.loader import find_records, load_rpw_labels, load_ecg_labels, load_rpw_ecg_map
 from utils.test import run_ecg_model, run_rpw_model
 from utils.bootstrap import verify_test_data, run_bootstrap
+from utils.clinical import run_clinical_model, write_missing_value_report, restrict_to_complete_cases
 
 
 class MetricCollector:
@@ -74,7 +76,7 @@ def calculate_metrics(preds, labels, files):
     """Calculate evaluation metrics from predictions and labels."""
     roc_curve = roc(y_true=labels, y_pred=preds, y_record_ids=files, c=1, calculation_method="subsample_level")
     area_under_curve = auc(roc_curve)
-    tp, fp, tn, fn, _ = confusionmatrix(labels, preds, files, threshold=0.5, c=1, calculation_method="subsample_level")
+    tp, fp, tn, fn, _ = confusionmatrix(labels, preds, files, threshold=config.classification_threshold, c=1, calculation_method="subsample_level")
 
     f1 = f1score(tp=tp, fp=fp, fn=fn)
     sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
@@ -138,6 +140,24 @@ def combine_rpw_ecg_models(rpw_dict, ecg_dict):
                                     np.mean([rpw_dict[rpw_key][1], ecg_dict[ecg_filename][1]], axis=0)]
 
     return result_dict
+
+
+def combine_by_session(dict_a, dict_b):
+    """Soft voting of two result dicts keyed by SessionID (only examinations present in both)."""
+    result_dict = {}
+    for key in dict_a.keys() & dict_b.keys():
+        if not np.array_equal(dict_a[key][1], dict_b[key][1]):
+            logging.error("Label mismatch for %s while combining models.", key)
+        result_dict[key] = [np.mean([dict_a[key][0], dict_b[key][0]], axis=0), dict_a[key][1]]
+    return result_dict
+
+
+def add_result_dict_to_collector(collector, result_dict, fold):
+    """Calculate metrics for a fold-level result dict and add it to a collector."""
+    roc_f, auc_f, sens_f, spec_f, f1_f = calculate_metrics_from_dict(result_dict)
+    collector.add_fold_metrics(hist=None, result_dict_sample=result_dict, roc_sample=roc_f,
+                               title_sample=f"Fold {fold}", auc_sample=auc_f, sensitivity_sample=sens_f,
+                               specificity_sample=spec_f, f1_score_sample=f1_f)
 
 
 def merge_fold_result_dicts(fold_result_dicts):
@@ -281,6 +301,9 @@ def compute_results(collector, fold, files_path, files_list, model_path, compute
         result_dict_sample = aggregate_subsamples(results_dict=result_dict_subsample,
                                                   key_func=lambda f: f"{f.split('_')[0]}_{f.split('_')[1]}")
 
+    if config.clinical_complete_cases_only:
+        result_dict_sample = restrict_to_complete_cases(result_dict_sample)
+
     (roc_sample, auc_sample, sensitivity_sample, specificity_sample, f1_score_sample)\
         = calculate_metrics_from_dict(result_dict=result_dict_sample)
 
@@ -320,14 +343,24 @@ def generate_plots(collectors, main_dir):
     else:
         logging.error("Incomplete folds for combined_test")
 
+    table_only = []
+    for key, expected in [('clinical_val', config.num_folds), ('clinical_test', config.num_folds + 1),
+                          ('clin_comb_val', config.num_folds), ('clin_comb_test', config.num_folds + 1)]:
+        if key not in collectors:
+            continue
+        if len(collectors[key].aucs_sample) == expected:
+            table_only.append(collectors[key])
+        else:
+            logging.error("Incomplete folds for %s", key)
+
     if not collectors_to_plot:
         logging.warning("No data available for plotting.")
         return
 
-    generate_results(collectors_to_plot, main_dir)
+    generate_results(collectors_to_plot, main_dir, table_only_collectors=table_only)
 
 
-def evaluate_models(main_dir, rpw_model_dir, ecg_model_dir, explanations=False, histogram=False):
+def evaluate_models(main_dir, rpw_model_dir, ecg_model_dir, explanations=False, histogram=False, clinical=True):
     """Evaluate trained models and generate results."""
 
     if not os.path.exists(main_dir):
@@ -341,6 +374,13 @@ def evaluate_models(main_dir, rpw_model_dir, ecg_model_dir, explanations=False, 
         'ecg_test': MetricCollector("ECG Test"),
         'combined_test': MetricCollector("Combined Test")
     }
+    if clinical:
+        # Model names must not contain spaces (first token = model, second token = dataset)
+        collectors['clinical_val'] = MetricCollector("Clinical Validation")
+        collectors['clinical_test'] = MetricCollector("Clinical Test")
+        collectors['clin_comb_val'] = MetricCollector("Clinical+Combined Validation")
+        collectors['clin_comb_test'] = MetricCollector("Clinical+Combined Test")
+        write_missing_value_report(main_dir)
 
     for sub_dir in range(1, config.num_folds + 1):
         print(f"Processing Fold {sub_dir}...")
@@ -410,16 +450,34 @@ def evaluate_models(main_dir, rpw_model_dir, ecg_model_dir, explanations=False, 
                                                 specificity_sample=combined_test_specificity,
                                                 f1_score_sample=combined_test_f1_score)
 
+        # Clinical reference model and soft voting with the RPW-ECG fusion (same folds / test set)
+        if clinical:
+            clinical_val_result_dict, clinical_test_result_dict = run_clinical_model(fold=sub_dir)
+            if config.clinical_complete_cases_only:
+                clinical_val_result_dict = restrict_to_complete_cases(clinical_val_result_dict)
+                clinical_test_result_dict = restrict_to_complete_cases(clinical_test_result_dict)
+            add_result_dict_to_collector(collectors['clinical_val'], clinical_val_result_dict, sub_dir)
+            add_result_dict_to_collector(collectors['clinical_test'], clinical_test_result_dict, sub_dir)
+            add_result_dict_to_collector(collectors['clin_comb_val'],
+                                         combine_by_session(clinical_val_result_dict, combined_val_result_dict), sub_dir)
+            add_result_dict_to_collector(collectors['clin_comb_test'],
+                                         combine_by_session(clinical_test_result_dict, combined_test_result_dict), sub_dir)
+
     combine_fold_models_to_ensemble(collectors['rpw_test'])
     combine_fold_models_to_ensemble(collectors['ecg_test'])
     combine_fold_models_to_ensemble(collectors['combined_test'])
+    if clinical:
+        combine_fold_models_to_ensemble(collectors['clinical_test'])
+        combine_fold_models_to_ensemble(collectors['clin_comb_test'])
 
     rpw_ens = collectors['rpw_test'].result_dicts_sample[-1]
     ecg_ens = collectors['ecg_test'].result_dicts_sample[-1]
+    clin_ens = collectors['clinical_test'].result_dicts_sample[-1] if clinical else {}
     rpw_ecg_map = load_rpw_ecg_map()
     with open(f"{main_dir}/test_predictions.csv", mode="w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["participant_id", "y", "p_rpw", "p_ecg", "p_comb"])
+        header = ["participant_id", "y", "p_rpw", "p_ecg", "p_comb"]
+        writer.writerow(header + (["p_clin", "p_clin_comb"] if clinical else []))
         for rpw_key in rpw_ens.keys():
             ecg_filename = rpw_ecg_map[rpw_key].split(".")[0]
             if ecg_filename in ecg_ens:
@@ -432,12 +490,21 @@ def evaluate_models(main_dir, rpw_model_dir, ecg_model_dir, explanations=False, 
                 p_ecg_scalar = p_ecg_val[1] if isinstance(p_ecg_val, (np.ndarray, list)) and len(
                     p_ecg_val) > 1 else p_ecg_val
                 p_comb_scalar = (p_rpw_scalar + p_ecg_scalar) / 2
-                writer.writerow([rpw_key, y_scalar, p_rpw_scalar, p_ecg_scalar, p_comb_scalar])
+                row = [rpw_key, y_scalar, p_rpw_scalar, p_ecg_scalar, p_comb_scalar]
+                if clinical:
+                    # Empty if the examination was excluded (clinical_missing="drop")
+                    if rpw_key in clin_ens:
+                        p_clin_scalar = clin_ens[rpw_key][0][1]
+                        row += [p_clin_scalar, (p_clin_scalar + p_comb_scalar) / 2]
+                    else:
+                        row += ["", ""]
+                writer.writerow(row)
 
     verify_test_data(f"{main_dir}/test_predictions.csv")
-    run_bootstrap(f"{main_dir}/test_predictions.csv", n_boot=10000)
+    run_bootstrap(f"{main_dir}/test_predictions.csv", n_boot=config.n_bootstrap)
 
     generate_plots(collectors, main_dir)
+    plot_test_rocs(main_dir)  # Main figure: test ROCs only (fold-level figure roc_plots.pdf -> supplement)
 
     if histogram:
         plot_histograms(collectors, main_dir)
@@ -509,12 +576,14 @@ def extract_validation_aucs(output_dir, model_type):
 
 
 if __name__ == '__main__':
+    results_dir = config.get_results_dir()
+    print(f"Saving results to {results_dir}")
     print("Extracting validation AUCs for RPW models...")
-    best_rpw_model = extract_validation_aucs(output_dir=f"{config.directory}/results", model_type="rpw")
+    best_rpw_model = extract_validation_aucs(output_dir=results_dir, model_type="rpw")
     print("Extracting validation AUCs for ECG models...")
-    best_ecg_model = extract_validation_aucs(output_dir=f"{config.directory}/results", model_type="ecg")
+    best_ecg_model = extract_validation_aucs(output_dir=results_dir, model_type="ecg")
 
-    evaluate_models(main_dir=f"{config.directory}/results",
+    evaluate_models(main_dir=results_dir,
                     rpw_model_dir=f"{config.directory}/models/rpw/{best_rpw_model}",
                     ecg_model_dir=f"{config.directory}/models/ecg/{best_ecg_model}",
                     explanations=True, histogram=True)

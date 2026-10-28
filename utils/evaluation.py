@@ -175,26 +175,90 @@ def plot_roc_to_pdf(roc, roc_title, path):
     plt.close()
 
 
-def generate_results(collectors, path):
+# Highlighting of selected table content (LaTeX \textcolor, requires \usepackage{xcolor}), see config.highlight_revision
+HIGHLIGHT_COLOR = config.highlight_color if config.highlight_revision else None
+HIGHLIGHTED_TABLE_BLOCKS = ("Clinical", "Clinical+Combined")  # Results table: fully highlighted model blocks
+HIGHLIGHT_CIS = True  # Results table: also highlight the 95% CI cells of the other model blocks
+# Display names for the results table
+TABLE_DISPLAY_NAMES = {"Clinical+Combined": "\\shortstack{Clinical +\\\\Combined}"}
+
+
+def highlight(x, on=True):
+    """Wrap a LaTeX table cell in \\textcolor if highlighting is enabled (config.highlight_revision)."""
+    if not on or HIGHLIGHT_COLOR is None or x in ("", None):
+        return x
+    return f"\\textcolor{{{HIGHLIGHT_COLOR}}}{{{x}}}"
+
+
+def collect_metrics(collector, title, suffix, consolidated_rows):
+    """Append per-fold, mean ± SD and ensemble metrics of a collector to consolidated_rows."""
+    aucs = getattr(collector, f"aucs_{suffix}")
+    sens = getattr(collector, f"sensitivities_{suffix}")
+    specs = getattr(collector, f"specificities_{suffix}")
+    f1s = getattr(collector, f"f1_scores_{suffix}")
+
+    if not aucs: return
+
+    metrics_data = {
+        'AUC': aucs,
+        'Sensitivity': sens,
+        'Specificity': specs,
+        'F1-Score': f1s
+    }
+
+    n_folds = min(len(aucs), config.num_folds)
+
+    for metric_name, values in metrics_data.items():
+        if not values: continue
+
+        fold_values = values[:n_folds]
+        valid_fold_values = [v for v in fold_values if v is not None]
+
+        if len(valid_fold_values) != config.num_folds:
+            logging.warning("Number of valid fold values (%d) for %s does not match expected folds (%d)", len(valid_fold_values), metric_name, config.num_folds)
+
+        if valid_fold_values:
+            mean_val = np.mean(valid_fold_values)
+            std_val = np.std(valid_fold_values)
+            mean_sd_str = f"{mean_val:.2f} $\\pm$ {std_val:.2f}"
+        else:
+            mean_sd_str = "-"
+
+        r = {
+            'Model': title,
+            'Metric': metric_name,
+            'Dataset': title.split(" ")[1],
+            'Mean $\\pm$ SD': mean_sd_str
+        }
+
+        for fold_idx in range(n_folds):
+            if fold_idx < n_folds:
+                val = values[fold_idx]
+                r[str(fold_idx + 1)] = f"{val:.2f}"
+            else:
+                r[str(fold_idx + 1)] = "-"
+
+        if len(values) == config.num_folds + 1:
+            val = values[config.num_folds]
+            r['Ensemble'] = f"{val:.2f}"
+        else:
+            r['Ensemble'] = "-"
+
+        consolidated_rows.append(r)
+
+
+def generate_results(collectors, path, table_only_collectors=()):
     """
     Generate and save consolidated result tables and ROC plots from multiple model collectors.
 
     Args:
         collectors (list): A list of objects containing ROC and metric data per fold.
         path (str): The directory path to save outputs (PDFs and TeX files).
+        table_only_collectors (iterable): Collectors that are only added to the results table (no ROC panel).
     """
 
-    colors = [
-        "indigo",
-        "purple",
-        "cornflowerblue",
-        "lightsalmon",
-        "green",
-        "red",
-        "yellow",
-        "lightgray",
-        "darkgray"
-    ]
+    # Colour-blind-safe styling (Okabe-Ito): folds in neutral grey, identity also carried by line style/width
+    fold_color, mean_color, ensemble_color, band_color, chance_color = "#9a9a9a", "#0072B2", "#D55E00", "#0072B2", "#BDBDBD"
 
     fig = plt.figure(figsize=(18, 10))
     gs = fig.add_gridspec(2, 3)
@@ -210,7 +274,7 @@ def generate_results(collectors, path):
 
     consolidated_rows = []
 
-    for ax, collector in zip(axes, collectors):
+    for panel_idx, (ax, collector) in enumerate(zip(axes, collectors)):
         title = collector.name
 
         def plot_rocs(rocs, titles):
@@ -242,14 +306,14 @@ def generate_results(collectors, path):
                 tprs = [0.0] + tprs + [1.0]
                 fprs, tprs = zip(*sorted(zip(fprs, tprs)))
 
-                label = titles[n]
+                label = "Individual folds" if n == 0 else None
 
-                ax.plot(fprs, tprs, label=label, alpha=0.8, linewidth=1, color=colors[n], linestyle='-')
+                ax.plot(fprs, tprs, label=label, alpha=0.7, linewidth=0.8, color=fold_color, linestyle='-')
 
             mean_tpr = np.mean(tprs_interp, axis=0)
             mean_tpr[-1] = 1.0
 
-            ax.plot(mean_fpr, mean_tpr, label="Average", alpha=1, linewidth=3, color=colors[n_folds],
+            ax.plot(mean_fpr, mean_tpr, label="Average", alpha=1, linewidth=2.2, color=mean_color,
                     linestyle='-')
 
             if len(rocs) == config.num_folds + 1:
@@ -262,90 +326,41 @@ def generate_results(collectors, path):
                     fprs, tprs = zip(*sorted(zip(fprs, tprs)))
 
                     label = titles[n_folds]
-                    ax.plot(fprs, tprs, label=label, alpha=1, linewidth=3, color=colors[n_folds+1],
-                            linestyle='-')
+                    ax.plot(fprs, tprs, label=label, alpha=1, linewidth=2.2, color=ensemble_color,
+                            linestyle=(0, (5, 2)))
                 else:
                     logging.warning("Ensemble ROC curve is None")
 
             std_tpr = np.std(tprs_interp, axis=0)
             tprs_upper = np.minimum(mean_tpr + std_tpr, 1)
             tprs_lower = np.maximum(mean_tpr - std_tpr, 0)
-            ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color=colors[n_folds+2], alpha=0.5,
-                            label=f'$\pm$ 1 std. dev.')
+            ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color=band_color, alpha=0.15, linewidth=0,
+                            label='$\\pm$ 1 std. dev.')
 
-            ax.plot([0, 1], [0, 1], label="Chance", alpha=0.8, linestyle='--', color=colors[n_folds+3])
+            ax.plot([0, 1], [0, 1], label="Chance", alpha=1, linewidth=1, linestyle=(0, (1, 1.5)), color=chance_color)
 
         plot_rocs(collector.rocs_sample, collector.titles_sample)
 
-        ax.set_xlim((-0.05, 1.05))
-        ax.set_ylim((-0.05, 1.05))
-        ax.set_xlabel('False Positive Rate', fontsize=15)
-        ax.set_ylabel('True Positive Rate', fontsize=15)
+        ax.set_xlim((0, 1))
+        ax.set_ylim((0, 1))
+        ax.set_aspect('equal')
+        ax.set_xticks(np.linspace(0, 1, 6))
+        ax.set_yticks(np.linspace(0, 1, 6))
+        ax.set_xlabel('1 − specificity', fontsize=15)
+        ax.set_ylabel('Sensitivity', fontsize=15)
         ax.tick_params(axis='both', which='major', labelsize=15)
-        ax.set_title(title, fontsize=16)
+        ax.set_title(f"{'abcdef'[panel_idx]}) {title}", loc="left", fontsize=16, fontweight="bold")
         ax.label_outer()
 
-        def collect_metrics(suffix):
-            aucs = getattr(collector, f"aucs_{suffix}")
-            sens = getattr(collector, f"sensitivities_{suffix}")
-            specs = getattr(collector, f"specificities_{suffix}")
-            f1s = getattr(collector, f"f1_scores_{suffix}")
+        collect_metrics(collector, title, "sample", consolidated_rows)
 
-            if not aucs: return
-
-            metrics_data = {
-                'AUC': aucs,
-                'Sensitivity': sens,
-                'Specificity': specs,
-                'F1-Score': f1s
-            }
-
-            n_folds = min(len(aucs), config.num_folds)
-
-            for metric_name, values in metrics_data.items():
-                if not values: continue
-
-                fold_values = values[:n_folds]
-                valid_fold_values = [v for v in fold_values if v is not None]
-
-                if len(valid_fold_values) != config.num_folds:
-                    logging.warning("Number of valid fold values (%d) for %s does not match expected folds (%d)", len(valid_fold_values), metric_name, config.num_folds)
-
-                if valid_fold_values:
-                    mean_val = np.mean(valid_fold_values)
-                    std_val = np.std(valid_fold_values)
-                    mean_sd_str = f"{mean_val:.2f} $\pm$ {std_val:.2f}"
-                else:
-                    mean_sd_str = "-"
-
-                r = {
-                    'Model': title,
-                    'Metric': metric_name,
-                    'Dataset': title.split(" ")[1],
-                    'Mean $\pm$ SD': mean_sd_str
-                }
-
-                for fold_idx in range(n_folds):
-                    if fold_idx < n_folds:
-                        val = values[fold_idx]
-                        r[str(fold_idx + 1)] = f"{val:.2f}"
-                    else:
-                        r[str(fold_idx + 1)] = "-"
-
-                if len(values) == config.num_folds + 1:
-                    val = values[config.num_folds]
-                    r['Ensemble'] = f"{val:.2f}"
-                else:
-                    r['Ensemble'] = "-"
-
-                consolidated_rows.append(r)
-
-        collect_metrics("sample")
+    for collector in table_only_collectors:
+        collect_metrics(collector, collector.name, "sample", consolidated_rows)
 
     bootstrap_df = pd.read_csv(f'{path}/bootstrap.csv')
     bootstrap_dict = {}
     metric_map = {'AUC': 'AUC', 'SENS': 'Sensitivity', 'SPEC': 'Specificity', 'F1': 'F1-Score'}
-    model_map = {'RPW': 'RPW', 'ECG': 'ECG', 'COMB': 'Combined'}
+    model_map = {'RPW': 'RPW', 'ECG': 'ECG', 'COMB': 'Combined', 'CLIN': 'Clinical', 'CLIN_COMB': 'Clinical+Combined'}
     for _, row in bootstrap_df.iterrows():
         mod = model_map.get(row['Model'])
         met = metric_map.get(row['Metric'])
@@ -358,6 +373,8 @@ def generate_results(collectors, path):
         f.write(r"\begin{tabular}{lllcccccccc}" + "\n")
         f.write(r"\toprule" + "\n")
         titles_list = ["RPW", "ECG", "Combined"]
+        titles_list += [t for t in ["Clinical", "Clinical+Combined"]
+                        if any(r['Model'].split(" ")[0] == t for r in consolidated_rows)]
         f.write(
             r" & \multirow{2}{*}{\textbf{Metric}} & \multirow{2}{*}{\textbf{Dataset}} & \multicolumn{5}{c}{\makecell{\textbf{Group-stratified 5-fold} \\ \textbf{Cross-validation Split}}} & \multirow{2}{*}{\textbf{Mean $\pm$ SD}} & \multirow{2}{*}{\textbf{Ensemble}} & \multirow{2}{*}{\textbf{95\% CI}} \\" + "\n")
         f.write(r"\cmidrule(lr){4-8}" + "\n")
@@ -369,6 +386,11 @@ def generate_results(collectors, path):
                 f.write(r"\midrule" + "\n")
 
             model_rows = [r for r in consolidated_rows if r['Model'].split(" ")[0] == title]
+
+            is_new = title in HIGHLIGHTED_TABLE_BLOCKS
+            def mark(x):
+                return highlight(x, is_new)
+            display_title = TABLE_DISPLAY_NAMES.get(title, title)
 
             metrics_order = ['AUC', 'Sensitivity', 'Specificity', 'F1-Score']
 
@@ -389,22 +411,25 @@ def generate_results(collectors, path):
                     dataset = row['Dataset']
                     folds = [row.get(str(k), '-') for k in range(1, 6)]
                     ensemble = row.get('Ensemble', '-')
-                    mean_sd = row.get('Mean $\pm$ SD', '-')
+                    mean_sd = row.get('Mean $\\pm$ SD', '-')
                     boot_val = bootstrap_dict.get((title, metric), '-') if ensemble != '-' else '-'
                     if first_metric and r_idx == 0:
-                        line_start = rf"\multirow{{{total_rows}}}{{*}}{{\rotatebox[origin=c]{{90}}{{\textbf{{{title}}}}}}} & "
+                        title_cell = mark(r"\textbf{" + display_title + "}")
+                        line_start = rf"\multirow{{{total_rows}}}{{*}}{{\rotatebox[origin=c]{{90}}{{{title_cell}}}}} & "
                     else:
                         line_start = "& "
                     if r_idx == 0:
-                        line_start += rf"\multirow{{{len(metric_rows)}}}{{*}}{{{metric}}} & "
+                        line_start += rf"\multirow{{{len(metric_rows)}}}{{*}}{{{mark(metric)}}} & "
                     else:
                         line_start += "& "
                     if title == "Combined":
                         ensemble_str = f"\\textbf{{{ensemble}}}"
                     else:
                         ensemble_str = ensemble
-                    f.write(
-                        f"{line_start} {dataset} & {' & '.join(folds)} & {mean_sd} & {ensemble_str} & {boot_val} \\\\" + "\n")
+                    if HIGHLIGHT_CIS and not is_new and boot_val != '-':
+                        boot_val = highlight(boot_val)
+                    cells = [dataset] + folds + [mean_sd, ensemble_str, boot_val]
+                    f.write(f"{line_start} {' & '.join(mark(c) for c in cells)} \\\\" + "\n")
                 
                 first_metric = False
 
@@ -420,7 +445,7 @@ def generate_results(collectors, path):
             handles, labels = h, l
 
     if handles:
-        fig.legend(handles, labels, loc='center right', bbox_to_anchor=(0.99, 0.5), fontsize=15)
+        fig.legend(handles, labels, loc='center right', bbox_to_anchor=(0.99, 0.5), fontsize=15, framealpha=1, facecolor='white')
 
     plot_path = f"{path}/roc_plots.pdf"
     plt.tight_layout(rect=[0, 0, 0.85, 1])
@@ -588,7 +613,7 @@ def plot_metrics_course_wrapper(df, metrics, subdir):
         plot_metrics_course(df, metrics, subdir)
 
 
-def format_mean_std(series):
+def format_mean_std(series, show_n=True):
     """
     Format a Pandas Series into a string of its mean and standard deviation.
 
@@ -601,6 +626,8 @@ def format_mean_std(series):
     mean = series.mean()
     std = series.std()
     valid_n = series.count()
+    if not show_n:
+        return f"${mean:.2f} \\pm {std:.2f}$"
     return f"${mean:.2f} \\pm {std:.2f}$ (n={valid_n})"
 
 
@@ -618,19 +645,24 @@ def calculate_metrics(df):
     total_len = len(df)
     metrics['Examinations'] = str(total_len)
     metrics['Participants'] = str(df['PatID'].nunique())
-    valid_n_ebpr = df['Label'].count()
-    ebpr_pct = (df['Label'].dropna() == 1).mean() * 100
-    metrics['Exhibiting eBPR'] = f"{ebpr_pct:.1f}\\% (n={valid_n_ebpr})"
-    valid_n_male = df['gender'].count()
-    male_pct = df['gender'].dropna().isin(values=['M', 'm', 'Male', 'male', 1]).mean() * 100
-    metrics['Male'] = f"{male_pct:.2f}\\% (n={valid_n_male})"
-    metrics['SBP/MET Slope'] = format_mean_std(series=df['sbp_met_slope'])
+    male_values = ['M', 'm', 'Male', 'male', 1]
+    labels = df['Label'].dropna()
+    n_ebpr = int((labels == 1).sum())
+    metrics['Exhibiting eBPR'] = f"{100 * n_ebpr / len(labels):.1f}\\%"
+    genders = df['gender'].dropna()
+    n_male = int(genders.isin(values=male_values).sum())
+    metrics['Male (examinations)'] = f"{100 * n_male / len(genders):.1f}\\%"
+    genders_p = df.dropna(subset=['gender']).groupby('PatID')['gender'].first()
+    n_male_p = int(genders_p.isin(values=male_values).sum())
+    metrics['Male (participants)'] = f"{100 * n_male_p / len(genders_p):.1f}\\%"
+    metrics['SBP/MET Slope'] = format_mean_std(series=df['sbp_met_slope'], show_n=False)
     metrics['Age'] = format_mean_std(series=df['age'])
     metrics['Height'] = format_mean_std(series=df['height'])
     metrics['Weight'] = format_mean_std(series=df['weight'])
     metrics['BMI'] = format_mean_std(series=df['bmi'])
     metrics['BSA'] = format_mean_std(series=df['bsa'])
-    metrics['Train Years'] = format_mean_std(series=df['train_years'])
+    metrics['Training history'] = format_mean_std(series=df['train_years'])
+    metrics['Weekly training volume'] = format_mean_std(series=df['train_weekly'])
     metrics['Brachial SBP'] = format_mean_std(series=df['sys_rest'])
     metrics['Brachial DBP'] = format_mean_std(series=df['dia_rest'])
     metrics['Aortic SBP'] = format_mean_std(series=df['sys_aortic'])
@@ -638,6 +670,17 @@ def calculate_metrics(df):
     metrics['Heart Rate Rest'] = format_mean_std(series=df['hr_rest'])
     metrics['Max. Heart Rate Exercise'] = format_mean_std(series=df['hr_max'])
     return metrics
+
+
+# Cohort table: highlighted rows ("values": only the numbers, "all": label and numbers, "label": only the label)
+HIGHLIGHTED_COHORT_ROWS = {"Exhibiting eBPR": "values", "Male (examinations)": "all",
+                       "Male (participants)": "all", "SBP/MET Slope": "all",
+                       "Training history": "label", "Weekly training volume": "all"}
+# Units of the cohort variables (highlighted unless the whole label is already highlighted)
+COHORT_UNITS = {"SBP/MET Slope": "mmHg/MET", "Age": "years", "Height": "cm", "Weight": "kg", "BMI": "kg/m$^2$",
+                "BSA": "m$^2$", "Training history": "years", "Weekly training volume": "min/week",
+                "Brachial SBP": "mmHg", "Brachial DBP": "mmHg", "Aortic SBP": "mmHg", "Aortic DBP": "mmHg",
+                "Heart Rate Rest": "bpm", "Max. Heart Rate Exercise": "bpm"}
 
 
 def generate_cohort_table(path):
@@ -660,9 +703,102 @@ def generate_cohort_table(path):
         f.write(" & \\textbf{Overall} & \\textbf{Development} & \\textbf{Test} \\\\\n")
         f.write("\\midrule\n")
         for key in metrics_overall.keys():
-            if key == "SBP/MET Slope":
+            if key == "Age":
                 f.write("\\midrule\n")
-            f.write(f"\\textbf{{{key}}} & {metrics_overall[key]} & {metrics_dev[key]} & {metrics_test[key]} \\\\\n")
+            mode = HIGHLIGHTED_COHORT_ROWS.get(key)
+            mark = highlight
+            unit = COHORT_UNITS.get(key)
+            unit_str = f" ({unit})" if unit else ""
+            if mode == "all":
+                label = mark(f"\\textbf{{{key}{unit_str}}}", True)
+            else:
+                label = mark(f"\\textbf{{{key}}}", mode == "label")
+                if unit:
+                    label += " " + mark(f"\\textbf{{({unit})}}", True)
+            values = [mark(v, mode in ("values", "all")) for v in (metrics_overall[key], metrics_dev[key], metrics_test[key])]
+            f.write(f"{label} & {' & '.join(values)} \\\\\n")
         f.write("\\bottomrule\n")
         f.write("\\end{tabular}\n")
     print(f"Cohort Table saved to {output_path}")
+    generate_split_table(path)
+
+
+RPW_WINDOWS_PER_EXAMINATION = 4  # RPW single recordings (pulse waves) per examination (see create_labels.ipynb / aggregate_subsamples)
+ECG_WINDOWS_PER_EXAMINATION = config.ecg_num_windows  # Overlapping ECG windows per 12-lead recording
+
+
+def calculate_split_counts(df):
+    """
+    Count independent participants, examinations, eBPR cases and signal windows for one data partition.
+
+    Args:
+        df (pd.DataFrame): Subset of labels.csv.
+
+    Returns:
+        dict: Raw counts for the partition.
+    """
+    n_exam = len(df)
+    n_ebpr_exam = int((df['Label'] == 1).sum())
+    return {
+        'participants': int(df['PatID'].nunique()),
+        'participants_ebpr': int(df.loc[df['Label'] == 1, 'PatID'].nunique()),
+        'examinations': n_exam,
+        'examinations_ebpr': n_ebpr_exam,
+        'examinations_ebpr_pct': 100 * n_ebpr_exam / n_exam if n_exam else float('nan'),
+        'rpw_windows': n_exam * RPW_WINDOWS_PER_EXAMINATION,
+        'ecg_windows': n_exam * ECG_WINDOWS_PER_EXAMINATION,
+    }
+
+
+def generate_split_table(path):
+    """
+    Generate a table with the number of independent participants, examinations and eBPR cases
+    per cross-validation fold and for the hold-out test set (saved as .csv and .tex).
+
+    Args:
+        path (str): The directory containing labels.csv and where the output files will be saved.
+    """
+    df = pd.read_csv(f"{path}/labels.csv")
+    df_dev = df[df['Split'] == 'trainval']
+    df_test = df[df['Split'] == 'test']
+
+    # Sanity check: participant-level partitioning (no participant in more than one fold / split)
+    part = df['Fold'].where(df['Split'] == 'trainval', 'test').astype(str)
+    leaked = df.assign(part=part).groupby('PatID')['part'].nunique()
+    if (leaked > 1).any():
+        logging.error("Participants assigned to more than one partition: %s", list(leaked[leaked > 1].index))
+
+    columns = {}
+    for fold in range(1, config.num_folds + 1):
+        columns[f"Fold {fold}"] = calculate_split_counts(df_dev[df_dev['Fold'] == fold])
+    columns['Development'] = calculate_split_counts(df_dev)
+    columns['Test'] = calculate_split_counts(df_test)
+    columns['Overall'] = calculate_split_counts(df)
+
+    counts = pd.DataFrame(columns).T  # rows: partitions, columns: counts
+    counts = counts.astype({c: int for c in counts.columns if c != 'examinations_ebpr_pct'})
+    counts.to_csv(f"{path}/split_table.csv", index_label='partition', float_format='%.1f')
+
+    rows = [
+        ('Participants', lambda c: f"{c['participants']}"),
+        ('Participants with eBPR', lambda c: f"{c['participants_ebpr']}"),
+        ('Examinations', lambda c: f"{c['examinations']}"),
+        ('Examinations with eBPR', lambda c: f"{c['examinations_ebpr']} ({c['examinations_ebpr_pct']:.1f}\\%)"),
+        ('RPW recordings', lambda c: f"{c['rpw_windows']}"),
+        ('ECG windows', lambda c: f"{c['ecg_windows']}"),
+    ]
+
+    output_path = f"{path}/split_table.tex"
+    with open(output_path, 'w') as f:
+        f.write("\\begin{tabular}{l" + "c" * len(columns) + "}\n")
+        f.write("\\toprule\n")
+        blue = highlight  # whole table highlighted
+        f.write(" & " + " & ".join(blue(f"\\textbf{{{k}}}") for k in columns) + " \\\\\n")
+        f.write("\\midrule\n")
+        for name, fmt in rows:
+            if name == 'RPW recordings':
+                f.write("\\midrule\n")
+            f.write(blue(f"\\textbf{{{name}}}") + " & " + " & ".join(blue(fmt(c)) for c in columns.values()) + " \\\\\n")
+        f.write("\\bottomrule\n")
+        f.write("\\end{tabular}\n")
+    print(f"Split Table saved to {output_path}")

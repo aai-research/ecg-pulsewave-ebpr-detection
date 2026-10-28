@@ -6,6 +6,8 @@ import math
 from sklearn import metrics
 import numpy as np
 
+import config
+
 
 def roc(y_true, y_pred, y_record_ids, c=0, calculation_method='subsample_level'):
     """
@@ -61,7 +63,7 @@ def auc(rocvalues):
     return metrics.auc(fpr_values, tpr_values)
 
 
-def confusionmatrix(y_true, y_pred, y_record_ids, c=0, threshold=0.5, calculation_method='subsample_level'):
+def confusionmatrix(y_true, y_pred, y_record_ids, c=0, threshold=None, calculation_method='subsample_level'):
     """
     Calculate the confusion matrix parameters (TP, FP, TN, FN) and record classifications.
 
@@ -70,12 +72,14 @@ def confusionmatrix(y_true, y_pred, y_record_ids, c=0, threshold=0.5, calculatio
         y_pred (list): Predicted probabilities.
         y_record_ids (list): Record identifiers.
         c (int, optional): The class index. Defaults to 0.
-        threshold (float, optional): Classification threshold. Defaults to 0.5.
+        threshold (float, optional): Classification threshold. Defaults to config.classification_threshold.
         calculation_method (str, optional): Supported calculation methods are 'sample_level' and 'subsample_level'. Defaults to 'subsample_level'.
 
     Returns:
         tuple: True Positives (tp), False Positives (fp), True Negatives (tn), False Negatives (fn), and a dictionary of classifications (cls).
     """
+    if threshold is None:
+        threshold = config.classification_threshold
     assert calculation_method in ['sample_level', 'subsample_level']
 
     tp = 0

@@ -56,7 +56,7 @@ def run_rpw_model(rpw_model_path, rpw_files_path, rpw_files_list, plot_explanati
             rpw_result_dict[rpw_file] = [pred, [1, 0]]
 
         if plot_explanations:
-            pred_class = np.argmax(pred)
+            pred_class = int(pred[1] > config.classification_threshold)
 
             if label != 1 or pred_class != 1:
                 continue
@@ -110,11 +110,11 @@ def run_ecg_model(ecg_model_path, ecg_files_path, ecg_files_list, plot_explanati
     ecg_hist = []
 
     for ecg_file in sorted(ecg_files_list):
-        for i, start in enumerate(range(0, int(2500 - 2000) + 1,
-                       int((2500 - 2000) / 4))):
+        stride = (config.ecg_record_length - config.ecg_window_size) // (config.ecg_num_windows - 1)
+        for i, start in enumerate(range(0, config.ecg_record_length - config.ecg_window_size + 1, stride)):
 
             subsample = load_and_preprocess_signal(record_id=ecg_file,
-                                                   subsampling_window_size=2000, subsample_start=start,
+                                                   subsampling_window_size=config.ecg_window_size, subsample_start=start,
                                                    src_dir=ecg_files_path)
             pred = ecg_model.predict(np.expand_dims(subsample, axis=0))[0]
             label = ecg_labels[f"{ecg_file}.npy"]
@@ -124,7 +124,7 @@ def run_ecg_model(ecg_model_path, ecg_files_path, ecg_files_list, plot_explanati
                 ecg_results_dict[f"{ecg_file}_{i}"] = [pred, [1, 0]]
 
             if plot_explanations:
-                pred_class = np.argmax(pred)
+                pred_class = int(pred[1] > config.classification_threshold)
 
                 if label != 1 or pred_class != 1:
                     continue

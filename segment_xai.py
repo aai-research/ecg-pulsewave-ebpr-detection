@@ -19,8 +19,8 @@ from utils.radar import radar_factory
 
 
 FS = 500  # Sampling rate (Hz)
-WINDOW = 2000  # Subsample length used by run_ecg_model
-STRIDE = 125  # Subsample stride used by run_ecg_model (5 windows over 2500 samples)
+WINDOW = config.ecg_window_size  # Subsample length used by run_ecg_model
+STRIDE = (config.ecg_record_length - WINDOW) // (config.ecg_num_windows - 1)  # Subsample stride used by run_ecg_model
 LEADS = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']
 SEGMENTS = ['P', 'PQ', 'Q', 'R', 'S', 'ST', 'T', 'TP']
 FIDUCIALS = ['p_on', 'p_off', 'qrs_on', 'r_on', 'r_off', 'qrs_off', 't_on', 't_off']  # ms relative to R-peak
@@ -224,7 +224,7 @@ def enrichment(R, mask):
 
 
 def plot_qc(ecg_id, beat, pre, f, save_to):
-    """Median beat per lead with the segment mask, to verify (and adjust) the fiducials."""
+    """Mean beat per lead with the segment mask, to verify (and adjust) the fiducials."""
     t = ms(np.arange(len(beat)) - pre)
     mask = build_mask(f, [pre], len(beat))[:, 0]
     fig, axs = plt.subplots(3, 4, figsize=(14, 7), sharex=True)
@@ -422,7 +422,7 @@ if __name__ == '__main__':
                         help='Overwrite fiducials.csv with the automatic delineation (discards manual edits)')
     args = parser.parse_args()
 
-    base_dir = f"{config.directory}/results"
+    base_dir = config.get_results_dir()
     out_dir = f"{base_dir}/segment_xai"
     os.makedirs(f"{out_dir}/qc", exist_ok=True)
     fid_path = f"{out_dir}/fiducials.csv"

@@ -19,7 +19,7 @@ from utils.data import perform_shape_switch
 
 
 if __name__ == '__main__':
-    base_dir = f"{config.directory}/results"
+    base_dir = config.get_results_dir()
 
     num_beats = 1
 
@@ -65,7 +65,7 @@ if __name__ == '__main__':
     )
     plt.xlim(0, len(mean_RPW[0]))
     plt.ylim(65, 135)
-    plt.xlabel("Time (ms)", fontsize=16)
+    plt.xlabel("Normalized time (samples)", fontsize=16)
     plt.ylabel("Pressure (mmHg)", fontsize=16)
     ax.tick_params(axis='both', which='major', labelsize=12)
     ax.spines["top"].set_visible(False)
